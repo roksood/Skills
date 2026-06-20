@@ -1,0 +1,58 @@
+{
+  "project": {
+    "name": "Acme API (example)",
+    "language": "Python",
+    "framework": "FastAPI",
+    "summary": "A worked example showing the trace-spec shape. Two use cases share several objects, which is the point: tracing flows teaches you what each object is for far better than an import map does."
+  },
+  "layers": [
+    { "id": "route",    "label": "Route / endpoint",        "color": "blue" },
+    { "id": "service",  "label": "Service / business logic", "color": "purple" },
+    { "id": "data",     "label": "Data access",              "color": "teal" },
+    { "id": "security", "label": "Auth / security",          "color": "amber" },
+    { "id": "external", "label": "External I/O",             "color": "coral" }
+  ],
+  "use_cases": [
+    {
+      "id": "login",
+      "name": "A user logs in with email and password",
+      "trigger": "POST /auth/login",
+      "summary": "Watch control bounce across layers: route to service to data to security and back. That bounce is the real shape of the request.",
+      "steps": [
+        { "n": 1, "task": "Receive the request", "object": "AuthController.login()", "location": "app/api/auth.py:42", "does": "Parses the POST body, pulls out email and password", "layer": "route" },
+        { "n": 2, "task": "Verify the credentials", "object": "AuthService.authenticate()", "location": "app/services/auth_service.py:88", "does": "Orchestrates the check and decides pass or fail", "layer": "service", "detail": "Coordinates the next three steps. Returns a User on success or raises InvalidCredentials, which the route turns into a 401." },
+        { "n": 3, "task": "Load the user record", "object": "UserRepository.find_by_email()", "location": "app/data/user_repository.py:31", "does": "Runs a SELECT by email, returns a User or None", "layer": "data" },
+        { "n": 4, "task": "Check the password", "object": "PasswordHasher.verify()", "location": "app/security/password_hasher.py:17", "does": "Constant-time compare against the stored bcrypt hash", "layer": "security" },
+        { "n": 5, "task": "Issue a session token", "object": "TokenService.issue()", "location": "app/security/token_service.py:54", "does": "Signs a JWT carrying the user id and an expiry", "layer": "security" },
+        { "n": 6, "task": "Return the response", "object": "AuthController.login()", "location": "app/api/auth.py:60", "does": "Serializes the token to JSON and sets the cookie", "layer": "route" }
+      ]
+    },
+    {
+      "id": "place_order",
+      "name": "A signed-in user places an order",
+      "trigger": "POST /orders",
+      "summary": "Reuses TokenService and UserRepository from the login flow, then adds the order-specific objects.",
+      "steps": [
+        { "n": 1, "task": "Receive the request", "object": "OrderController.create()", "location": "app/api/orders.py:55", "does": "Parses the cart payload from the request body", "layer": "route" },
+        { "n": 2, "task": "Authenticate the caller", "object": "TokenService.verify()", "location": "app/security/token_service.py:72", "does": "Validates the JWT and extracts the user id", "layer": "security" },
+        { "n": 3, "task": "Load the user", "object": "UserRepository.find_by_id()", "location": "app/data/user_repository.py:48", "does": "Fetches the user row for ownership and limits", "layer": "data" },
+        { "n": 4, "task": "Build and price the order", "object": "OrderService.create()", "location": "app/services/order_service.py:30", "does": "Validates the cart, computes totals, applies tax", "layer": "service" },
+        { "n": 5, "task": "Charge the card", "object": "PaymentGateway.charge()", "location": "app/external/payment_gateway.py:19", "does": "Calls the payment provider, returns a charge id", "layer": "external" },
+        { "n": 6, "task": "Persist the order", "object": "OrderRepository.save()", "location": "app/data/order_repository.py:22", "does": "INSERTs the order and line items in one transaction", "layer": "data" },
+        { "n": 7, "task": "Return the confirmation", "object": "OrderController.create()", "location": "app/api/orders.py:71", "does": "Serializes the saved order to JSON, status 201", "layer": "route" }
+      ]
+    },
+    {
+      "id": "refresh_token",
+      "name": "A client refreshes an expiring token",
+      "trigger": "POST /auth/refresh",
+      "summary": "Shows an object whose traced code spans two files: TokenService.rotate() is inherited from a base class in a different module, so the objects index draws a per-file mini-map for it.",
+      "steps": [
+        { "n": 1, "task": "Receive the request", "object": "AuthController.refresh()", "location": "app/api/auth.py:78", "does": "Reads the existing refresh token from the request", "layer": "route" },
+        { "n": 2, "task": "Validate the token", "object": "TokenService.verify()", "location": "app/security/token_service.py:72", "does": "Confirms the token is well-formed and unexpired", "layer": "security" },
+        { "n": 3, "task": "Rotate the token", "object": "TokenService.rotate()", "location": "app/security/base_token.py:40", "does": "Invalidates the old token and mints a replacement", "layer": "security", "detail": "rotate() is not defined in token_service.py — it's inherited from BaseTokenService in app/security/base_token.py. The trace points at where the code actually runs, which is why TokenService shows up under two files in the objects index." },
+        { "n": 4, "task": "Return the new token", "object": "AuthController.refresh()", "location": "app/api/auth.py:90", "does": "Serializes the fresh token to JSON", "layer": "route" }
+      ]
+    }
+  ]
+}
